@@ -41,22 +41,15 @@ fi
 echo "Step 1: Mounting EFI partition..."
 echo ""
 
-# Find the EFI partition by scanning all physical disks
+# Find the EFI partition by checking s1 on each disk
 EFI_PART=""
-for disk in $(diskutil list | grep "^/dev/disk[0-9]" | grep "physical" | awk '{print $1}' | sed 's|/dev/||'); do
-  candidate="${disk}s1"
+for i in 0 1 2 3 4 5; do
+  candidate="disk${i}s1"
   if diskutil info "$candidate" 2>/dev/null | grep -qi "EFI"; then
     EFI_PART="$candidate"
     break
   fi
 done
-
-# Fallback: try disk0s1 directly
-if [[ -z "$EFI_PART" ]]; then
-  if diskutil info "disk0s1" 2>/dev/null | grep -qi "EFI"; then
-    EFI_PART="disk0s1"
-  fi
-fi
 
 if [[ -z "$EFI_PART" ]]; then
   echo "Error: Could not find any EFI partition"
