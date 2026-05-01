@@ -114,6 +114,22 @@ Once macOS is installed and working, you can shut down the VM and increase resou
 qm set <VMID> --cores 32 --memory 65536
 ```
 
+### Post-install setup (Apple ID, iCloud, App Store)
+
+After macOS is installed, run this inside the macOS VM Terminal to set up everything needed for Apple ID:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mchiappinam/proxmox-macos/main/guest-scripts/setup-smbios.sh -o /tmp/setup-smbios.sh && bash /tmp/setup-smbios.sh
+```
+
+The script handles:
+- Mounting the EFI partition
+- Installing OpenCore to the internal disk (so you can remove the ISO later)
+- Installing VMHide.kext (required for Apple ID on Sonoma/Sequoia)
+- Generating and applying unique SMBIOS serial numbers
+
+After running the script and rebooting, Apple ID, iCloud, and the App Store should work.
+
 ### Template workflow (recommended)
 
 Install macOS once, then clone instantly for new VMs:
@@ -175,6 +191,7 @@ Without GPU passthrough, the VM uses basic VGA emulation. For better performance
 - [Acidanthera](https://github.com/acidanthera) for the OpenCore bootloader and kexts
 - [Dortania](https://dortania.github.io/) for the OpenCore install guides
 - [macrecovery](https://github.com/acidanthera/OpenCorePkg/tree/master/Utilities/macrecovery) for the macOS recovery downloader
+- [VMHide](https://github.com/Carnations-Botanica/VMHide) for VM detection bypass enabling iServices
 
 ## License
 

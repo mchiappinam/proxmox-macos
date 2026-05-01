@@ -3,7 +3,8 @@
 # setup-smbios.sh
 # Run inside the macOS VM to install OpenCore to EFI and configure SMBIOS
 #
-# Usage: curl -fsSL https://raw.githubusercontent.com/mchiappinam/proxmox-macos/main/guest-scripts/setup-smbios.sh | bash
+# Usage (download and run):
+#   curl -fsSL https://raw.githubusercontent.com/mchiappinam/proxmox-macos/main/guest-scripts/setup-smbios.sh -o /tmp/setup-smbios.sh && bash /tmp/setup-smbios.sh
 #
 
 set -e
@@ -48,10 +49,11 @@ if ! diskutil info "$EFI_PART" 2>/dev/null | grep -q "EFI"; then
   exit 1
 fi
 
-sudo diskutil mount -mountPoint "$EFI_MOUNT" "$EFI_PART" 2>/dev/null || true
+sudo diskutil mount -mountPoint "$EFI_MOUNT" "$EFI_PART"
 
-if [[ ! -d "$EFI_MOUNT" ]]; then
-  echo "Error: Failed to mount EFI partition"
+# Verify it actually mounted by checking for content
+if ! mount | grep -q "$EFI_MOUNT"; then
+  echo "Error: EFI partition failed to mount"
   exit 1
 fi
 
@@ -72,7 +74,7 @@ else
 fi
 
 if [[ ! -f "$CONFIG" ]]; then
-  echo "Error: config.plist not found"
+  echo "Error: config.plist not found after install"
   exit 1
 fi
 
@@ -89,49 +91,45 @@ else
   echo "  Required for Apple ID/iCloud on macOS Sonoma and Sequoia."
   echo ""
 
-  cd /tmp
-  rm -rf VMHide.kext VMHide*.zip 2>/dev/null
+  local_tmp=$(mktemp -d)
+  trap "rm -rf '$local_tmp'" EXIT
 
-  if curl -fsSL -o VMHide.zip "$VMHIDE_URL"; then
-    unzip -q -o VMHide.zip -d /tmp/vmhide_extract 2>/dev/null
+  if curl -fsSL -o "$local_tmp/VMHide.zip" "$VMHIDE_URL"; then
+    unzip -q -o "$local_tmp/VMHide.zip" -d "$local_tmp/extract" 2>/dev/null || true
 
     # Find VMHide.kext in the extracted files
-    VMHIDE_KEXT=$(find /tmp/vmhide_extract -name "VMHide.kext" -type d | head -1)
+    VMHIDE_KEXT=$(find "$local_tmp/extract" -name "VMHide.kext" -type d | head -1)
 
-    if [[ -n "$VMHIDE_KEXT" ]]; then
+    if [[ -n "$VMHIDE_KEXT" && -d "$VMHIDE_KEXT" ]]; then
       cp -r "$VMHIDE_KEXT" "$KEXTS_DIR/"
       echo "  VMHide.kext copied to Kexts folder."
 
-      # Add VMHide.kext to config.plist Kernel > Add array
-      # Find the last kext entry index
-      last_idx=0
-      while plutil -extract Kernel.Add.$last_idx raw "$CONFIG" &>/dev/null; do
-        ((last_idx++))
-      done
+      # Check if VMHide is already in config.plist to avoid duplicates
+      if ! grep -q "VMHide.kext" "$CONFIG" 2>/dev/null; then
+        # Find the last kext entry index
+        last_idx=0
+        while plutil -extract Kernel.Add.$last_idx raw "$CONFIG" &>/dev/null; do
+          ((last_idx++))
+        done
 
-      # Add new entry at the end
-      plutil -insert Kernel.Add.$last_idx -json '{
-        "Arch": "x86_64",
-        "BundlePath": "VMHide.kext",
-        "Comment": "Hides VM detection for iServices",
-        "Enabled": true,
-        "ExecutablePath": "Contents/MacOS/VMHide",
-        "MaxKernel": "",
-        "MinKernel": "",
-        "PlistPath": "Contents/Info.plist"
-      }' "$CONFIG" 2>/dev/null
+        # Add new entry at the end (single-line JSON for compatibility)
+        plutil -insert Kernel.Add.$last_idx -json '{"Arch":"x86_64","BundlePath":"VMHide.kext","Comment":"Hides VM detection for iServices","Enabled":true,"ExecutablePath":"Contents/MacOS/VMHide","MaxKernel":"","MinKernel":"","PlistPath":"Contents/Info.plist"}' "$CONFIG" 2>/dev/null
 
-      echo "  VMHide.kext added to config.plist."
+        echo "  VMHide.kext added to config.plist."
+      else
+        echo "  VMHide.kext already in config.plist."
+      fi
     else
       echo "  Warning: Could not find VMHide.kext in download."
       echo "  Download manually from: https://github.com/Carnations-Botanica/VMHide/releases"
     fi
-
-    rm -rf /tmp/vmhide_extract /tmp/VMHide.zip
   else
     echo "  Warning: Failed to download VMHide.kext."
     echo "  Download manually from: https://github.com/Carnations-Botanica/VMHide/releases"
   fi
+
+  rm -rf "$local_tmp"
+  trap - EXIT
 fi
 
 # ── Step 4: Show current SMBIOS ──────────────────────────────────────────────
@@ -187,34 +185,34 @@ echo "  Once you have the values, enter them below."
 echo "  Press Enter to skip a field and keep the current value."
 echo ""
 
-# ── Step 6: Enter values ─────────────────────────────────────────────────────
+# ── Step 6: Enter values (read from /dev/tty for curl|bash compatibility) ────
 cur_type=$(plutil -extract PlatformInfo.Generic.SystemProductName raw "$CONFIG" 2>/dev/null || echo "")
 cur_serial=$(plutil -extract PlatformInfo.Generic.SystemSerialNumber raw "$CONFIG" 2>/dev/null || echo "")
 cur_mlb=$(plutil -extract PlatformInfo.Generic.MLB raw "$CONFIG" 2>/dev/null || echo "")
 cur_uuid=$(plutil -extract PlatformInfo.Generic.SystemUUID raw "$CONFIG" 2>/dev/null || echo "")
 
-read -rp "  SystemProductName [$cur_type]: " new_type
+read -rp "  SystemProductName [$cur_type]: " new_type </dev/tty
 new_type="${new_type:-$cur_type}"
 
-read -rp "  Serial: " new_serial
+read -rp "  Serial: " new_serial </dev/tty
 if [[ -z "$new_serial" ]]; then
   echo "  Keeping current serial."
   new_serial="$cur_serial"
 fi
 
-read -rp "  Board Serial (MLB): " new_mlb
+read -rp "  Board Serial (MLB): " new_mlb </dev/tty
 if [[ -z "$new_mlb" ]]; then
   echo "  Keeping current MLB."
   new_mlb="$cur_mlb"
 fi
 
-read -rp "  SmUUID: " new_uuid
+read -rp "  SmUUID: " new_uuid </dev/tty
 if [[ -z "$new_uuid" ]]; then
   echo "  Keeping current UUID."
   new_uuid="$cur_uuid"
 fi
 
-read -rp "  Apple ROM [442A6077B912]: " new_rom
+read -rp "  Apple ROM [442A6077B912]: " new_rom </dev/tty
 new_rom="${new_rom:-442A6077B912}"
 
 # ── Step 7: Confirm and apply ────────────────────────────────────────────────
@@ -226,7 +224,7 @@ echo "    MLB:                $new_mlb"
 echo "    SystemUUID:         $new_uuid"
 echo "    ROM:                $new_rom"
 echo ""
-read -rp "  Apply these values? [Y/n]: " confirm
+read -rp "  Apply these values? [Y/n]: " confirm </dev/tty
 if [[ ! "${confirm:-Y}" =~ ^[Yy]$ ]]; then
   echo "  Cancelled."
   exit 0
