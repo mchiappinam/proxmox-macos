@@ -1290,6 +1290,119 @@ show_vm_config() {
   read -n 1 -sp "Press any key to return to menu..."
 }
 
+# ── Edit VM config ────────────────────────────────────────────────────────────
+edit_vm_config() {
+  clear
+  echo -e "${BOLD}Edit macOS VM Configuration${NC}"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  find_macos_vms
+  if [[ ${#MACOS_VM_IDS[@]} -eq 0 ]]; then
+    echo "  No macOS VMs found."
+    echo ""
+    read -n 1 -sp "Press any key to return to menu..."
+    return
+  fi
+
+  echo "  macOS VMs:"
+  for vid in "${MACOS_VM_IDS[@]}"; do
+    local vname vstatus vcores vmem
+    local conf="/etc/pve/qemu-server/${vid}.conf"
+    vname=$(grep "^name:" "$conf" 2>/dev/null | awk '{print $2}') || true
+    vstatus=$(qm status "$vid" 2>/dev/null | awk '{print $2}') || vstatus="unknown"
+    vcores=$(grep "^cores:" "$conf" 2>/dev/null | awk '{print $2}') || true
+    vmem=$(grep "^memory:" "$conf" 2>/dev/null | awk '{print $2}') || true
+    echo "    $vid - ${vname:-unnamed} ($vstatus, ${vcores:-?} cores, ${vmem:-?}M RAM)"
+  done
+
+  echo ""
+  read -rp "  VM ID to edit (or 0 to cancel): " edit_id
+  [[ "$edit_id" == "0" || -z "$edit_id" ]] && return
+
+  local valid=false
+  for v in "${MACOS_VM_IDS[@]}"; do
+    [[ "$v" == "$edit_id" ]] && valid=true
+  done
+  if ! $valid; then
+    fail "VM $edit_id is not a macOS VM"
+    read -n 1 -sp "Press any key to return to menu..."
+    return
+  fi
+
+  local conf="/etc/pve/qemu-server/${edit_id}.conf"
+  local cur_cores cur_mem cur_name
+  cur_name=$(grep "^name:" "$conf" 2>/dev/null | awk '{print $2}') || true
+  cur_cores=$(grep "^cores:" "$conf" 2>/dev/null | awk '{print $2}') || true
+  cur_mem=$(grep "^memory:" "$conf" 2>/dev/null | awk '{print $2}') || true
+
+  echo ""
+  echo "  Current config for VM $edit_id ($cur_name):"
+  echo "    Cores:  ${cur_cores:-?}"
+  echo "    RAM:    ${cur_mem:-?} MiB"
+  echo ""
+  echo "  Press Enter to keep current value."
+  echo ""
+
+  # Cores
+  local new_cores
+  while true; do
+    read -rp "  CPU cores [${cur_cores}]: " new_cores
+    new_cores="${new_cores:-$cur_cores}"
+    if [[ "$new_cores" =~ ^[0-9]+$ ]] && (( new_cores > 0 && new_cores <= 128 )); then
+      break
+    fi
+    echo "  Must be 1-128."
+  done
+
+  # RAM
+  local new_mem
+  while true; do
+    read -rp "  RAM in MiB [${cur_mem}]: " new_mem
+    new_mem="${new_mem:-$cur_mem}"
+    if [[ "$new_mem" =~ ^[0-9]+$ ]] && (( new_mem >= 2048 )); then
+      break
+    fi
+    echo "  Minimum 2048 MiB."
+  done
+
+  # Check if anything changed
+  if [[ "$new_cores" == "$cur_cores" && "$new_mem" == "$cur_mem" ]]; then
+    info "No changes made"
+    read -n 1 -sp "Press any key to return to menu..."
+    return
+  fi
+
+  # Warn if running
+  local status
+  status=$(qm status "$edit_id" 2>/dev/null | awk '{print $2}') || true
+  if [[ "$status" == "running" ]]; then
+    warn "VM is running. Changes will apply after next restart."
+  fi
+
+  # Summary
+  echo ""
+  echo "  Changes:"
+  [[ "$new_cores" != "$cur_cores" ]] && echo "    Cores: $cur_cores -> $new_cores"
+  [[ "$new_mem" != "$cur_mem" ]] && echo "    RAM:   $cur_mem -> $new_mem MiB"
+  echo ""
+  read -rp "  Apply changes? [Y/n]: " confirm
+  [[ ! "${confirm:-Y}" =~ ^[Yy]$ ]] && return
+
+  local set_args=""
+  [[ "$new_cores" != "$cur_cores" ]] && set_args="$set_args --cores $new_cores"
+  [[ "$new_mem" != "$cur_mem" ]] && set_args="$set_args --memory $new_mem"
+
+  if qm set "$edit_id" $set_args >>"$LOG_FILE" 2>&1; then
+    ok "VM $edit_id updated"
+    log "Updated VM $edit_id: cores=$new_cores, memory=$new_mem"
+  else
+    fail "Failed to update VM $edit_id"
+  fi
+
+  echo ""
+  read -n 1 -sp "Press any key to return to menu..."
+}
+
 
 # ── Deploy from Template ──────────────────────────────────────────────────────
 deploy_from_template() {
@@ -1457,8 +1570,9 @@ main_menu() {
     echo "   22  - Delete a macOS VM"
     echo "   23  - Toggle verbose boot"
     echo "   24  - Show VM config"
-    echo "   25  - Clone a macOS VM"
-    echo "   26  - Convert VM to template"
+    echo "   25  - Edit VM config (cores, RAM)"
+    echo "   26  - Clone a macOS VM"
+    echo "   27  - Convert VM to template"
     echo ""
     echo "    0  - Quit"
     echo ""
@@ -1469,7 +1583,7 @@ main_menu() {
         if $has_templates; then
           deploy_from_template
         else
-          warn "No templates available. Create one first (option 26)."
+          warn "No templates available. Create one first (option 27)."
           sleep 2
         fi
         ;;
@@ -1486,8 +1600,9 @@ main_menu() {
       22) delete_macos_vm ;;
       23) toggle_verbose_boot ;;
       24) show_vm_config ;;
-      25) clone_macos_vm ;;
-      26) convert_to_template ;;
+      25) edit_vm_config ;;
+      26) clone_macos_vm ;;
+      27) convert_to_template ;;
       0|"") exit 0 ;;
       *)  warn "Invalid option"; sleep 1 ;;
     esac
