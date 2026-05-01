@@ -90,8 +90,9 @@ The main menu:
    22  - Delete a macOS VM
    23  - Toggle verbose boot
    24  - Show VM config
-   25  - Clone a macOS VM
-   26  - Convert VM to template
+   25  - Edit VM config (cores, RAM)
+   26  - Clone a macOS VM
+   27  - Convert VM to template
 
     0  - Quit
 ```
@@ -119,7 +120,7 @@ Install macOS once, then clone instantly for new VMs:
 
 1. Set up macOS how you like (apps, settings, etc.)
 2. Shut down the VM
-3. Run `macos-vm`, option **26** to convert to template
+3. Run `macos-vm`, option **27** to convert to template
 4. From now on, press **D** to deploy new VMs instantly, no reinstall needed
 
 ### CLI flags

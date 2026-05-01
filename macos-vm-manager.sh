@@ -110,7 +110,7 @@ check_dependencies() {
   fi
 
   # Required tools
-  for cmd in pvesm pvesh losetup mount umount wget bc python3 mkfs.msdos genisoimage; do
+  for cmd in pvesm pvesh losetup mount umount wget bc python3 mkfs.msdos; do
     if ! command -v "$cmd" &>/dev/null; then
       missing+=("$cmd")
     fi
@@ -128,7 +128,6 @@ check_dependencies() {
         wget)         pkgs+=("wget") ;;
         bc)           pkgs+=("bc") ;;
         mkfs.msdos)   pkgs+=("dosfstools") ;;
-        genisoimage)  pkgs+=("genisoimage") ;;
         losetup)      pkgs+=("util-linux") ;;
         *)            pkgs+=("$cmd") ;;
       esac
@@ -466,13 +465,10 @@ download_opencore_iso() {
   info "Source: $OPENCORE_DOWNLOAD_URL"
   echo ""
 
-  if ! wget --progress=bar:force -O "$iso_path" "$OPENCORE_DOWNLOAD_URL" 2>&1 | tail -1; then
-    # wget failed, try without progress
-    if ! wget -q -O "$iso_path" "$OPENCORE_DOWNLOAD_URL"; then
-      fail "Failed to download OpenCore ISO"
-      rm -f "$iso_path"
-      return 1
-    fi
+  if ! wget -q --show-progress -O "$iso_path" "$OPENCORE_DOWNLOAD_URL" 2>&1; then
+    fail "Failed to download OpenCore ISO"
+    rm -f "$iso_path"
+    return 1
   fi
 
   if [[ ! -s "$iso_path" ]]; then
@@ -1026,7 +1022,7 @@ convert_to_template() {
 
   echo ""
   echo -e "  ${YELLOW}WARNING: This will convert VM $tmpl_id ($tmpl_name) to a read-only template.${NC}"
-  echo "  You will not be able to start it directly — only clone from it."
+  echo "  You will not be able to start it directly, only clone from it."
   echo "  This action can be reversed from the Proxmox UI if needed."
   echo ""
   read -rp "  Type 'yes' to confirm: " confirm
@@ -1042,7 +1038,7 @@ convert_to_template() {
   log "Converted VM $tmpl_id ($tmpl_name) to template"
   echo ""
   echo "  To create a new VM from this template:"
-  echo "    - Use option 14 (Clone macOS VM) from the menu"
+  echo "    - Use option 26 (Clone macOS VM) from the menu"
   echo "    - Or: qm clone $tmpl_id <new-id> --name <name> --full --storage <storage>"
   echo ""
   read -n 1 -sp "Press any key to return to menu..."
@@ -1157,185 +1153,30 @@ toggle_verbose_boot() {
   clear
   echo -e "${BOLD}Toggle Verbose Boot${NC}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-  # Find OpenCore ISO
-  if ! find_opencore_iso; then
-    fail "OpenCore ISO not found"
-    read -n 1 -sp "Press any key to return to menu..."
-    return
-  fi
-  local iso_path="$OC_ISO_PATH"
-
-  # Mount the ISO (ISO9660, mounts directly)
-  local iso_loopdev
-  iso_loopdev=$(losetup -f --show "$iso_path") || {
-    fail "Failed to setup loop device for ISO"
-    read -n 1 -sp "Press any key to return to menu..."
-    return
-  }
-
-  mkdir -p /mnt/_oc_iso
-  if ! mount -o ro "$iso_loopdev" /mnt/_oc_iso 2>/dev/null; then
-    fail "Failed to mount OpenCore ISO"
-    losetup -d "$iso_loopdev" 2>/dev/null
-    read -n 1 -sp "Press any key to return to menu..."
-    return
-  fi
-
-  # The config.plist lives inside BOOT.img (the EFI partition image)
-  local boot_img="/mnt/_oc_iso/BOOT.img"
-  if [[ ! -f "$boot_img" ]]; then
-    fail "BOOT.img not found in OpenCore ISO"
-    umount /mnt/_oc_iso 2>/dev/null
-    losetup -d "$iso_loopdev" 2>/dev/null
-    read -n 1 -sp "Press any key to return to menu..."
-    return
-  fi
-
-  # Copy BOOT.img to a writable temp location (ISO is read-only)
-  local tmpdir
-  tmpdir=$(mktemp -d)
-  cp "$boot_img" "$tmpdir/BOOT.img"
-
-  local boot_loopdev
-  boot_loopdev=$(losetup -f --show "$tmpdir/BOOT.img") || {
-    fail "Failed to setup loop device for BOOT.img"
-    umount /mnt/_oc_iso 2>/dev/null
-    losetup -d "$iso_loopdev" 2>/dev/null
-    rm -rf "$tmpdir"
-    read -n 1 -sp "Press any key to return to menu..."
-    return
-  }
-
-  mkdir -p /mnt/_oc_boot
-  if ! mount "$boot_loopdev" /mnt/_oc_boot 2>/dev/null; then
-    fail "Failed to mount BOOT.img"
-    losetup -d "$boot_loopdev" 2>/dev/null
-    umount /mnt/_oc_iso 2>/dev/null
-    losetup -d "$iso_loopdev" 2>/dev/null
-    rm -rf "$tmpdir"
-    read -n 1 -sp "Press any key to return to menu..."
-    return
-  fi
-
-  local config="/mnt/_oc_boot/EFI/OC/config.plist"
-  if [[ ! -f "$config" ]]; then
-    fail "config.plist not found in BOOT.img"
-    umount /mnt/_oc_boot 2>/dev/null
-    losetup -d "$boot_loopdev" 2>/dev/null
-    umount /mnt/_oc_iso 2>/dev/null
-    losetup -d "$iso_loopdev" 2>/dev/null
-    rm -rf "$tmpdir"
-    read -n 1 -sp "Press any key to return to menu..."
-    return
-  fi
-
-  # Extract boot-args value safely
-  local current_args
-  current_args=$(python3 -c "
-import xml.etree.ElementTree as ET, sys
-tree = ET.parse('$config')
-keys = list(tree.iter())
-for i, el in enumerate(keys):
-    if el.tag == 'key' and el.text == 'boot-args' and i+1 < len(keys):
-        print(keys[i+1].text or '')
-        sys.exit(0)
-print('')
-" 2>/dev/null) || current_args=""
-
-  echo "  Current boot-args: ${current_args:-<empty>}"
   echo ""
-
-  local modified=false
-
-  if [[ "$current_args" == *"-v"* ]]; then
-    info "Verbose boot is currently ENABLED"
-    read -rp "  Disable verbose boot? [Y/n]: " choice
-    if [[ "${choice:-Y}" =~ ^[Yy]$ ]]; then
-      local new_args
-      new_args=$(echo "$current_args" | sed 's/ *-v *//g; s/  */ /g; s/^ *//; s/ *$//')
-      python3 -c "
-import xml.etree.ElementTree as ET
-tree = ET.parse('$config')
-keys = list(tree.iter())
-for i, el in enumerate(keys):
-    if el.tag == 'key' and el.text == 'boot-args' and i+1 < len(keys):
-        keys[i+1].text = '$new_args'
-        break
-tree.write('$config', xml_declaration=True, encoding='UTF-8')
-" 2>/dev/null
-      ok "Verbose boot disabled"
-      log "Verbose boot disabled. boot-args: $new_args"
-      modified=true
-    fi
-  else
-    info "Verbose boot is currently DISABLED"
-    read -rp "  Enable verbose boot? [Y/n]: " choice
-    if [[ "${choice:-Y}" =~ ^[Yy]$ ]]; then
-      local new_args="${current_args:+$current_args }-v"
-      python3 -c "
-import xml.etree.ElementTree as ET
-tree = ET.parse('$config')
-keys = list(tree.iter())
-for i, el in enumerate(keys):
-    if el.tag == 'key' and el.text == 'boot-args' and i+1 < len(keys):
-        keys[i+1].text = '$new_args'
-        break
-tree.write('$config', xml_declaration=True, encoding='UTF-8')
-" 2>/dev/null
-      ok "Verbose boot enabled"
-      log "Verbose boot enabled. boot-args: $new_args"
-      modified=true
-    fi
-  fi
-
-  # Unmount BOOT.img
-  umount /mnt/_oc_boot 2>/dev/null
-  losetup -d "$boot_loopdev" 2>/dev/null
-
-  # If modified, rebuild the ISO with the updated BOOT.img
-  if $modified; then
-    info "Rebuilding OpenCore ISO..."
-    umount /mnt/_oc_iso 2>/dev/null
-    losetup -d "$iso_loopdev" 2>/dev/null
-
-    # Mount ISO read-write by copying contents to temp
-    local iso_tmpdir
-    iso_tmpdir=$(mktemp -d)
-    iso_loopdev=$(losetup -f --show "$iso_path")
-    mount -o ro "$iso_loopdev" /mnt/_oc_iso 2>/dev/null
-    cp -a /mnt/_oc_iso/* "$iso_tmpdir/"
-    umount /mnt/_oc_iso 2>/dev/null
-    losetup -d "$iso_loopdev" 2>/dev/null
-
-    # Replace BOOT.img with modified version
-    cp "$tmpdir/BOOT.img" "$iso_tmpdir/BOOT.img"
-
-    # Rebuild ISO
-    if command -v genisoimage &>/dev/null; then
-      genisoimage -o "$iso_path" -R -J -V "LongQT-OpenCore" "$iso_tmpdir" >>"$LOG_FILE" 2>&1 && \
-        ok "ISO rebuilt successfully" || \
-        fail "Failed to rebuild ISO"
-    elif command -v mkisofs &>/dev/null; then
-      mkisofs -o "$iso_path" -R -J -V "LongQT-OpenCore" "$iso_tmpdir" >>"$LOG_FILE" 2>&1 && \
-        ok "ISO rebuilt successfully" || \
-        fail "Failed to rebuild ISO"
-    else
-      fail "Neither genisoimage nor mkisofs found, cannot rebuild ISO"
-      info "Install with: apt-get install -y genisoimage"
-    fi
-
-    rm -rf "$iso_tmpdir"
-  else
-    umount /mnt/_oc_iso 2>/dev/null
-    losetup -d "$iso_loopdev" 2>/dev/null
-  fi
-
-  # Cleanup
-  rm -rf "$tmpdir"
-  rmdir /mnt/_oc_boot 2>/dev/null
-  rmdir /mnt/_oc_iso 2>/dev/null
-
+  echo "  Verbose boot must be toggled from inside the macOS VM."
+  echo "  The OpenCore ISO's boot structure cannot be safely"
+  echo "  modified from the Proxmox host."
+  echo ""
+  echo -e "  ${BOLD}To disable verbose boot:${NC}"
+  echo ""
+  echo "  1. Boot into macOS"
+  echo "  2. Open the LongQT-OpenCore volume on the Desktop"
+  echo "  3. Run Mount_EFI.command (enter your password)"
+  echo "  4. Open EFI/OC/config.plist with ProperTree"
+  echo "     (or TextEdit)"
+  echo "  5. Find boot-args under:"
+  echo "     NVRAM > Add > 7C436110... > boot-args"
+  echo "  6. Remove '-v' from the value"
+  echo "     (e.g. 'keepsyms=1 -v' becomes 'keepsyms=1')"
+  echo "  7. Save and reboot"
+  echo ""
+  echo -e "  ${BOLD}To enable verbose boot:${NC}"
+  echo "  Same steps, but add '-v' to boot-args."
+  echo ""
+  echo -e "  ${BOLD}Alternative (quick toggle):${NC}"
+  echo "  At the OpenCore boot menu, press Space and select"
+  echo "  'Toggle SIP' or hold a key to access boot options."
   echo ""
   read -n 1 -sp "Press any key to return to menu..."
 }
@@ -1537,7 +1378,7 @@ deploy_from_template() {
     echo "    1. Install macOS in a VM (options 1-2)"
     echo "    2. Set it up how you like"
     echo "    3. Shut it down"
-    echo "    4. Convert to template (option 15)"
+    echo "    4. Convert to template (option 27)"
     echo ""
     read -n 1 -sp "Press any key to return to menu..."
     return
@@ -1678,7 +1519,7 @@ main_menu() {
     echo "   20  - Pre-flight system check"
     echo "   21  - List macOS VMs"
     echo "   22  - Delete a macOS VM"
-    echo "   23  - Toggle verbose boot (coming soon)"
+    echo "   23  - Toggle verbose boot"
     echo "   24  - Show VM config"
     echo "   25  - Edit VM config (cores, RAM)"
     echo "   26  - Clone a macOS VM"
@@ -1708,7 +1549,7 @@ main_menu() {
       20) preflight_check ;;
       21) list_macos_vms ;;
       22) delete_macos_vm ;;
-      23) warn "Verbose boot toggle temporarily disabled (ISO rebuild issue)"; sleep 2 ;;
+      23) toggle_verbose_boot ;;
       24) show_vm_config ;;
       25) edit_vm_config ;;
       26) clone_macos_vm ;;
