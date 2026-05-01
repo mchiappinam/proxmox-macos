@@ -110,7 +110,7 @@ check_dependencies() {
   fi
 
   # Required tools
-  for cmd in pvesm pvesh losetup mount umount wget bc python3 mkfs.msdos; do
+  for cmd in pvesm pvesh losetup mount umount wget bc python3 mkfs.msdos genisoimage; do
     if ! command -v "$cmd" &>/dev/null; then
       missing+=("$cmd")
     fi
@@ -128,6 +128,7 @@ check_dependencies() {
         wget)         pkgs+=("wget") ;;
         bc)           pkgs+=("bc") ;;
         mkfs.msdos)   pkgs+=("dosfstools") ;;
+        genisoimage)  pkgs+=("genisoimage") ;;
         losetup)      pkgs+=("util-linux") ;;
         *)            pkgs+=("$cmd") ;;
       esac
@@ -1139,29 +1140,66 @@ toggle_verbose_boot() {
   fi
   local iso_path="$OC_ISO_PATH"
 
-  # Mount
-  local loopdev
-  loopdev=$(losetup -f --show -P "$iso_path") || {
-    fail "Failed to setup loop device"
+  # Mount the ISO (ISO9660, mounts directly)
+  local iso_loopdev
+  iso_loopdev=$(losetup -f --show "$iso_path") || {
+    fail "Failed to setup loop device for ISO"
     read -n 1 -sp "Press any key to return to menu..."
     return
   }
 
-  mkdir -p /mnt/_opencore_edit
-  if ! mount "${loopdev}p1" /mnt/_opencore_edit 2>/dev/null; then
-    if ! mount "$loopdev" /mnt/_opencore_edit 2>/dev/null; then
-      fail "Failed to mount OpenCore ISO"
-      losetup -d "$loopdev" 2>/dev/null
-      read -n 1 -sp "Press any key to return to menu..."
-      return
-    fi
+  mkdir -p /mnt/_oc_iso
+  if ! mount -o ro "$iso_loopdev" /mnt/_oc_iso 2>/dev/null; then
+    fail "Failed to mount OpenCore ISO"
+    losetup -d "$iso_loopdev" 2>/dev/null
+    read -n 1 -sp "Press any key to return to menu..."
+    return
   fi
 
-  local config="/mnt/_opencore_edit/EFI/OC/config.plist"
+  # The config.plist lives inside BOOT.img (the EFI partition image)
+  local boot_img="/mnt/_oc_iso/BOOT.img"
+  if [[ ! -f "$boot_img" ]]; then
+    fail "BOOT.img not found in OpenCore ISO"
+    umount /mnt/_oc_iso 2>/dev/null
+    losetup -d "$iso_loopdev" 2>/dev/null
+    read -n 1 -sp "Press any key to return to menu..."
+    return
+  fi
+
+  # Copy BOOT.img to a writable temp location (ISO is read-only)
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  cp "$boot_img" "$tmpdir/BOOT.img"
+
+  local boot_loopdev
+  boot_loopdev=$(losetup -f --show "$tmpdir/BOOT.img") || {
+    fail "Failed to setup loop device for BOOT.img"
+    umount /mnt/_oc_iso 2>/dev/null
+    losetup -d "$iso_loopdev" 2>/dev/null
+    rm -rf "$tmpdir"
+    read -n 1 -sp "Press any key to return to menu..."
+    return
+  }
+
+  mkdir -p /mnt/_oc_boot
+  if ! mount "$boot_loopdev" /mnt/_oc_boot 2>/dev/null; then
+    fail "Failed to mount BOOT.img"
+    losetup -d "$boot_loopdev" 2>/dev/null
+    umount /mnt/_oc_iso 2>/dev/null
+    losetup -d "$iso_loopdev" 2>/dev/null
+    rm -rf "$tmpdir"
+    read -n 1 -sp "Press any key to return to menu..."
+    return
+  fi
+
+  local config="/mnt/_oc_boot/EFI/OC/config.plist"
   if [[ ! -f "$config" ]]; then
-    fail "config.plist not found in OpenCore ISO"
-    umount /mnt/_opencore_edit 2>/dev/null
-    losetup -d "$loopdev" 2>/dev/null
+    fail "config.plist not found in BOOT.img"
+    umount /mnt/_oc_boot 2>/dev/null
+    losetup -d "$boot_loopdev" 2>/dev/null
+    umount /mnt/_oc_iso 2>/dev/null
+    losetup -d "$iso_loopdev" 2>/dev/null
+    rm -rf "$tmpdir"
     read -n 1 -sp "Press any key to return to menu..."
     return
   fi
@@ -1182,6 +1220,8 @@ print('')
   echo "  Current boot-args: ${current_args:-<empty>}"
   echo ""
 
+  local modified=false
+
   if [[ "$current_args" == *"-v"* ]]; then
     info "Verbose boot is currently ENABLED"
     read -rp "  Disable verbose boot? [Y/n]: " choice
@@ -1200,6 +1240,7 @@ tree.write('$config', xml_declaration=True, encoding='UTF-8')
 " 2>/dev/null
       ok "Verbose boot disabled"
       log "Verbose boot disabled. boot-args: $new_args"
+      modified=true
     fi
   else
     info "Verbose boot is currently DISABLED"
@@ -1218,13 +1259,56 @@ tree.write('$config', xml_declaration=True, encoding='UTF-8')
 " 2>/dev/null
       ok "Verbose boot enabled"
       log "Verbose boot enabled. boot-args: $new_args"
+      modified=true
     fi
   fi
 
+  # Unmount BOOT.img
+  umount /mnt/_oc_boot 2>/dev/null
+  losetup -d "$boot_loopdev" 2>/dev/null
+
+  # If modified, rebuild the ISO with the updated BOOT.img
+  if $modified; then
+    info "Rebuilding OpenCore ISO..."
+    umount /mnt/_oc_iso 2>/dev/null
+    losetup -d "$iso_loopdev" 2>/dev/null
+
+    # Mount ISO read-write by copying contents to temp
+    local iso_tmpdir
+    iso_tmpdir=$(mktemp -d)
+    iso_loopdev=$(losetup -f --show "$iso_path")
+    mount -o ro "$iso_loopdev" /mnt/_oc_iso 2>/dev/null
+    cp -a /mnt/_oc_iso/* "$iso_tmpdir/"
+    umount /mnt/_oc_iso 2>/dev/null
+    losetup -d "$iso_loopdev" 2>/dev/null
+
+    # Replace BOOT.img with modified version
+    cp "$tmpdir/BOOT.img" "$iso_tmpdir/BOOT.img"
+
+    # Rebuild ISO
+    if command -v genisoimage &>/dev/null; then
+      genisoimage -o "$iso_path" -R -J -V "LongQT-OpenCore" "$iso_tmpdir" >>"$LOG_FILE" 2>&1 && \
+        ok "ISO rebuilt successfully" || \
+        fail "Failed to rebuild ISO"
+    elif command -v mkisofs &>/dev/null; then
+      mkisofs -o "$iso_path" -R -J -V "LongQT-OpenCore" "$iso_tmpdir" >>"$LOG_FILE" 2>&1 && \
+        ok "ISO rebuilt successfully" || \
+        fail "Failed to rebuild ISO"
+    else
+      fail "Neither genisoimage nor mkisofs found, cannot rebuild ISO"
+      info "Install with: apt-get install -y genisoimage"
+    fi
+
+    rm -rf "$iso_tmpdir"
+  else
+    umount /mnt/_oc_iso 2>/dev/null
+    losetup -d "$iso_loopdev" 2>/dev/null
+  fi
+
   # Cleanup
-  umount /mnt/_opencore_edit 2>/dev/null
-  losetup -d "$loopdev" 2>/dev/null
-  rmdir /mnt/_opencore_edit 2>/dev/null
+  rm -rf "$tmpdir"
+  rmdir /mnt/_oc_boot 2>/dev/null
+  rmdir /mnt/_oc_iso 2>/dev/null
 
   echo ""
   read -n 1 -sp "Press any key to return to menu..."
