@@ -41,41 +41,29 @@ fi
 echo "Step 1: Mounting EFI partition..."
 echo ""
 
-# Find the EFI partition: trace from root -> APFS container -> physical disk
-BOOT_DISK=$(diskutil info / | grep "Part of Whole" | awk '{print $NF}')
-
-# If boot disk is a synthesized APFS container, find the physical store
-PHYS_DISK="$BOOT_DISK"
-PHYS_STORE=$(diskutil info "$BOOT_DISK" | grep "Device / Media Name" | grep -i "synthesized" 2>/dev/null) || true
-if [[ -n "$PHYS_STORE" ]]; then
-  # It's a synthesized disk, look for the physical store
-  PHYS_DISK=$(diskutil list "$BOOT_DISK" | grep "Physical Store" | awk '{print $NF}' | sed 's/s[0-9]*$//') || true
-fi
-
-# If still not found, try disk0 as fallback (most common for single-disk VMs)
-if [[ -z "$PHYS_DISK" ]]; then
-  PHYS_DISK="disk0"
-fi
-
-EFI_PART="${PHYS_DISK}s1"
-
-if ! diskutil info "$EFI_PART" 2>/dev/null | grep -qi "EFI"; then
-  # Last resort: scan all disks for an EFI partition
-  EFI_PART=""
-  for disk in $(diskutil list | grep "^/dev/disk" | awk '{print $1}' | sed 's|/dev/||'); do
-    candidate="${disk}s1"
-    if diskutil info "$candidate" 2>/dev/null | grep -qi "EFI"; then
-      EFI_PART="$candidate"
-      break
-    fi
-  done
-
-  if [[ -z "$EFI_PART" ]]; then
-    echo "Error: Could not find any EFI partition"
-    echo "Disks found:"
-    diskutil list | grep "^/dev/disk\|EFI"
-    exit 1
+# Find the EFI partition by scanning all physical disks
+EFI_PART=""
+for disk in $(diskutil list | grep "^/dev/disk[0-9]" | grep "physical" | awk '{print $1}' | sed 's|/dev/||'); do
+  candidate="${disk}s1"
+  if diskutil info "$candidate" 2>/dev/null | grep -qi "EFI"; then
+    EFI_PART="$candidate"
+    break
   fi
+done
+
+# Fallback: try disk0s1 directly
+if [[ -z "$EFI_PART" ]]; then
+  if diskutil info "disk0s1" 2>/dev/null | grep -qi "EFI"; then
+    EFI_PART="disk0s1"
+  fi
+fi
+
+if [[ -z "$EFI_PART" ]]; then
+  echo "Error: Could not find any EFI partition"
+  echo ""
+  echo "Available disks:"
+  diskutil list
+  exit 1
 fi
 
 echo "  Found EFI partition: $EFI_PART"
