@@ -2,9 +2,11 @@
 
 Interactive macOS VM manager for Proxmox VE. Create, clone, template, and manage macOS virtual machines with a single command.
 
-Uses [LongQT OpenCore ISO](https://github.com/LongQT-sea/OpenCore-ISO) for a clean, vanilla macOS experience — no host-level modifications, no kernel patches, no OVMF hacks.
+Uses [LongQT OpenCore ISO](https://github.com/LongQT-sea/OpenCore-ISO) for a clean, vanilla macOS experience, no host-level modifications, no kernel patches, no OVMF hacks.
 
-## ⚠️ Disclaimer
+**Tested and working with macOS Sequoia on Proxmox VE 9.x.**
+
+## Disclaimer
 
 **This project is for educational and research purposes only.**
 
@@ -14,14 +16,15 @@ This project does not include or distribute any Apple software. It automates the
 
 ## Features
 
-- **Interactive TUI** — menu-driven, no commands to memorize
-- **Auto-detects your CPU** — picks the correct QEMU model for Intel and AMD
-- **Auto-downloads OpenCore ISO** — fetches LongQT OpenCore if not present
-- **Downloads macOS recovery** — pulls installer images directly from Apple
-- **Template support** — install once, clone instantly for new VMs
-- **Pre-flight check** — verifies KVM, CPU features, IOMMU, QEMU version
-- **No host modifications** — doesn't touch GRUB, modprobe, or system files
-- **Dependency management** — detects and installs missing tools automatically
+- **Interactive TUI** with menu-driven workflow
+- **Auto-detects your CPU** and picks the correct QEMU model for Intel and AMD
+- **Auto-downloads everything** including OpenCore ISO and macOS recovery images
+- **8 macOS versions** from High Sierra (10.13) to Sequoia (15)
+- **Template support** for instant VM deployment without reinstalling
+- **Clone support** with full or linked clones
+- **Pre-flight check** verifies KVM, CPU features, IOMMU, QEMU version
+- **No host modifications**, doesn't touch GRUB, modprobe, or system files
+- **Dependency management** detects and installs missing tools automatically
 
 ## Quick Install
 
@@ -96,20 +99,28 @@ The main menu:
 ### Creating your first VM
 
 1. Run `macos-vm`
-2. Pick a macOS version (1 for Sonoma, 2 for Sequoia)
+2. Pick a macOS version (e.g. 7 for Sonoma, 8 for Sequoia)
 3. Follow the prompts (VM ID, name, storage, cores, RAM, disk)
 4. The script downloads the recovery image and creates the VM
 5. Start the VM from the Proxmox web UI
 6. In the macOS installer: open Disk Utility, erase the VirtIO disk as APFS, then install macOS
 
+### Scaling up after install
+
+Once macOS is installed and working, you can shut down the VM and increase resources:
+
+```bash
+qm set <VMID> --cores 32 --memory 65536
+```
+
 ### Template workflow (recommended)
 
-After your first successful install:
+Install macOS once, then clone instantly for new VMs:
 
 1. Set up macOS how you like (apps, settings, etc.)
 2. Shut down the VM
-3. Run `macos-vm` → option **15** to convert to template
-4. From now on, press **D** to deploy new VMs instantly — no reinstall needed
+3. Run `macos-vm`, option **26** to convert to template
+4. From now on, press **D** to deploy new VMs instantly, no reinstall needed
 
 ### CLI flags
 
@@ -133,26 +144,36 @@ macos-vm --preflight   # Run system check and exit
 
 ## Troubleshooting
 
-### VM won't start — "host doesn't support requested feature"
+### VM won't start with "host doesn't support requested feature"
 
 Your CPU doesn't support the selected QEMU model. The script auto-detects this, but if you've manually changed the CPU type, revert to what the script chose.
 
-### Stuck at Apple logo / black screen
+### Stuck at Apple logo or black screen
 
-Enable verbose boot (option 12) to see where it freezes. Common fixes:
+Enable verbose boot (option 23) to see where it freezes. Common fixes:
 - Reduce CPU cores to 4 or 8
 - Ensure you're using the correct CPU model for your hardware
+
+### White or blank wallpaper
+
+This is normal without GPU acceleration. The default macOS dynamic wallpapers require GPU rendering. Set a static wallpaper from System Settings and it will display correctly.
 
 ### "The recovery server could not be contacted"
 
 The VM needs internet access. Make sure your bridge has connectivity and DNS is working.
 
+### Slow GUI performance
+
+Without GPU passthrough, the VM uses basic VGA emulation. For better performance:
+- Use the VM via VNC/Screen Sharing (Settings > General > Sharing) or Chrome Remote Desktop
+- For full GPU acceleration, pass through a supported Intel iGPU or discrete GPU
+
 ## Credits
 
-- [LongQT-sea/OpenCore-ISO](https://github.com/LongQT-sea/OpenCore-ISO) — OpenCore ISO for Proxmox/QEMU
-- [Acidanthera](https://github.com/acidanthera) — OpenCore bootloader and kexts
-- [Dortania](https://dortania.github.io/) — OpenCore install guides
-- [macrecovery](https://github.com/acidanthera/OpenCorePkg/tree/master/Utilities/macrecovery) — macOS recovery downloader
+- [LongQT-sea/OpenCore-ISO](https://github.com/LongQT-sea/OpenCore-ISO) for the OpenCore ISO for Proxmox/QEMU
+- [Acidanthera](https://github.com/acidanthera) for the OpenCore bootloader and kexts
+- [Dortania](https://dortania.github.io/) for the OpenCore install guides
+- [macrecovery](https://github.com/acidanthera/OpenCorePkg/tree/master/Utilities/macrecovery) for the macOS recovery downloader
 
 ## License
 
