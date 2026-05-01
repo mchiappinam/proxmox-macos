@@ -228,7 +228,7 @@ preflight_check() {
   local pass=true
 
   # KVM
-  if lsmod | grep -qw "kvm"; then
+  if grep -qw "kvm" /proc/modules 2>/dev/null; then
     ok "KVM module loaded"
   else
     fail "KVM module not loaded"
