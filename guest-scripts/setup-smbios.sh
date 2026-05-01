@@ -76,18 +76,76 @@ if [[ ! -f "$CONFIG" ]]; then
   exit 1
 fi
 
-# ── Step 3: Show current SMBIOS ──────────────────────────────────────────────
+# ── Step 3: Install VMHide.kext (required for Sequoia/Sonoma iServices) ──────
+KEXTS_DIR="$EFI_MOUNT/EFI/OC/Kexts"
+VMHIDE_URL="https://github.com/Carnations-Botanica/VMHide/releases/download/2.0.0/VMHide-2.0.0-RELEASE.zip"
+
+if [[ -d "$KEXTS_DIR/VMHide.kext" ]]; then
+  echo ""
+  echo "Step 3: VMHide.kext already installed."
+else
+  echo ""
+  echo "Step 3: Installing VMHide.kext..."
+  echo "  Required for Apple ID/iCloud on macOS Sonoma and Sequoia."
+  echo ""
+
+  cd /tmp
+  rm -rf VMHide.kext VMHide*.zip 2>/dev/null
+
+  if curl -fsSL -o VMHide.zip "$VMHIDE_URL"; then
+    unzip -q -o VMHide.zip -d /tmp/vmhide_extract 2>/dev/null
+
+    # Find VMHide.kext in the extracted files
+    VMHIDE_KEXT=$(find /tmp/vmhide_extract -name "VMHide.kext" -type d | head -1)
+
+    if [[ -n "$VMHIDE_KEXT" ]]; then
+      cp -r "$VMHIDE_KEXT" "$KEXTS_DIR/"
+      echo "  VMHide.kext copied to Kexts folder."
+
+      # Add VMHide.kext to config.plist Kernel > Add array
+      # Find the last kext entry index
+      last_idx=0
+      while plutil -extract Kernel.Add.$last_idx raw "$CONFIG" &>/dev/null; do
+        ((last_idx++))
+      done
+
+      # Add new entry at the end
+      plutil -insert Kernel.Add.$last_idx -json '{
+        "Arch": "x86_64",
+        "BundlePath": "VMHide.kext",
+        "Comment": "Hides VM detection for iServices",
+        "Enabled": true,
+        "ExecutablePath": "Contents/MacOS/VMHide",
+        "MaxKernel": "",
+        "MinKernel": "",
+        "PlistPath": "Contents/Info.plist"
+      }' "$CONFIG" 2>/dev/null
+
+      echo "  VMHide.kext added to config.plist."
+    else
+      echo "  Warning: Could not find VMHide.kext in download."
+      echo "  Download manually from: https://github.com/Carnations-Botanica/VMHide/releases"
+    fi
+
+    rm -rf /tmp/vmhide_extract /tmp/VMHide.zip
+  else
+    echo "  Warning: Failed to download VMHide.kext."
+    echo "  Download manually from: https://github.com/Carnations-Botanica/VMHide/releases"
+  fi
+fi
+
+# ── Step 4: Show current SMBIOS ──────────────────────────────────────────────
 echo ""
-echo "Step 3: Current SMBIOS configuration:"
+echo "Step 4: Current SMBIOS configuration:"
 echo ""
 echo "  SystemProductName:  $(plutil -extract PlatformInfo.Generic.SystemProductName raw "$CONFIG" 2>/dev/null || echo 'unknown')"
 echo "  SystemSerialNumber: $(plutil -extract PlatformInfo.Generic.SystemSerialNumber raw "$CONFIG" 2>/dev/null || echo 'unknown')"
 echo "  MLB:                $(plutil -extract PlatformInfo.Generic.MLB raw "$CONFIG" 2>/dev/null || echo 'unknown')"
 echo "  SystemUUID:         $(plutil -extract PlatformInfo.Generic.SystemUUID raw "$CONFIG" 2>/dev/null || echo 'unknown')"
 
-# ── Step 4: Generate SMBIOS ──────────────────────────────────────────────────
+# ── Step 5: Generate SMBIOS ──────────────────────────────────────────────────
 echo ""
-echo "Step 4: Generate unique SMBIOS serials"
+echo "Step 5: Generate unique SMBIOS serials"
 echo ""
 echo "  You need unique serials for Apple ID and iCloud to work."
 echo ""
@@ -129,7 +187,7 @@ echo "  Once you have the values, enter them below."
 echo "  Press Enter to skip a field and keep the current value."
 echo ""
 
-# ── Step 5: Enter values ─────────────────────────────────────────────────────
+# ── Step 6: Enter values ─────────────────────────────────────────────────────
 cur_type=$(plutil -extract PlatformInfo.Generic.SystemProductName raw "$CONFIG" 2>/dev/null || echo "")
 cur_serial=$(plutil -extract PlatformInfo.Generic.SystemSerialNumber raw "$CONFIG" 2>/dev/null || echo "")
 cur_mlb=$(plutil -extract PlatformInfo.Generic.MLB raw "$CONFIG" 2>/dev/null || echo "")
@@ -159,7 +217,7 @@ fi
 read -rp "  Apple ROM [442A6077B912]: " new_rom
 new_rom="${new_rom:-442A6077B912}"
 
-# ── Step 6: Confirm and apply ────────────────────────────────────────────────
+# ── Step 7: Confirm and apply ────────────────────────────────────────────────
 echo ""
 echo "  Will set:"
 echo "    SystemProductName:  $new_type"
