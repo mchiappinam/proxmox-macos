@@ -1678,7 +1678,7 @@ main_menu() {
     echo "   20  - Pre-flight system check"
     echo "   21  - List macOS VMs"
     echo "   22  - Delete a macOS VM"
-    echo "   23  - Toggle verbose boot"
+    echo "   23  - Toggle verbose boot (coming soon)"
     echo "   24  - Show VM config"
     echo "   25  - Edit VM config (cores, RAM)"
     echo "   26  - Clone a macOS VM"
@@ -1708,7 +1708,7 @@ main_menu() {
       20) preflight_check ;;
       21) list_macos_vms ;;
       22) delete_macos_vm ;;
-      23) toggle_verbose_boot ;;
+      23) warn "Verbose boot toggle temporarily disabled (ISO rebuild issue)"; sleep 2 ;;
       24) show_vm_config ;;
       25) edit_vm_config ;;
       26) clone_macos_vm ;;
