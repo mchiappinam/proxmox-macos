@@ -57,26 +57,38 @@ chmod +x /opt/proxmox-macos/macos-vm-manager.sh
 The main menu:
 
 ```
-  ┌─────────────────────────────────────────┐
-  │       macOS VM Manager v1.1.0           │
-  │       for Proxmox VE                    │
-  └─────────────────────────────────────────┘
+     #############################################
+     #                                           #
+     #      macOS VM Manager for Proxmox VE      #
+     #                                           #
+     #        Developed by mchiappinam           #
+     #         github.com/mchiappinam            #
+     #                                           #
+     #############################################
+
+  Version: 1.2.0
 
   Quick deploy:
     D  - Deploy new VM from template (no reinstall)
 
   Create macOS VM (fresh install):
-    1 - macOS Sonoma (14)
-    2 - macOS Sequoia (15)
+    1 - macOS High Sierra (10.13)
+    2 - macOS Mojave (10.14)
+    3 - macOS Catalina (10.15)
+    4 - macOS Big Sur (11)
+    5 - macOS Monterey (12)
+    6 - macOS Ventura (13)
+    7 - macOS Sonoma (14)
+    8 - macOS Sequoia (15)
 
   Tools:
-    9  - Pre-flight system check
-   10  - List macOS VMs
-   11  - Delete a macOS VM
-   12  - Toggle verbose boot
-   13  - Show VM config
-   14  - Clone a macOS VM
-   15  - Convert VM to template
+   20  - Pre-flight system check
+   21  - List macOS VMs
+   22  - Delete a macOS VM
+   23  - Toggle verbose boot
+   24  - Show VM config
+   25  - Clone a macOS VM
+   26  - Convert VM to template
 
     0  - Quit
 ```

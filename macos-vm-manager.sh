@@ -2,12 +2,15 @@
 #
 # macos-vm-manager.sh
 # Interactive macOS VM manager for Proxmox VE
-# Uses LongQT OpenCore ISO — no host-level modifications
+# Uses LongQT OpenCore ISO, no host-level modifications
+#
+# Developed by mchiappinam
+# https://github.com/mchiappinam/proxmox-macos
 #
 set -uo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-VERSION="1.1.0"
+VERSION="1.2.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/logs"
 LOG_FILE="${LOG_DIR}/macos-vm-manager.log"
@@ -26,8 +29,14 @@ ISO_STORAGE=""
 
 # macOS versions: name|version|board_id|model_id|recovery_size
 declare -A MACOS_VERSIONS=(
-  [1]="Sonoma|14|Mac-827FAC58A8FDFA22|00000000000000000|1450M"
-  [2]="Sequoia|15|Mac-7BA5B2D9E42DDD94|00000000000000000|1450M"
+  [1]="High Sierra|10.13|Mac-BE088AF8C5EB4FA2|00000000000J80300|800M"
+  [2]="Mojave|10.14|Mac-7BA5B2DFE22DDD8C|00000000000KXPG00|800M"
+  [3]="Catalina|10.15|Mac-00BE6ED71E35EB86|00000000000000000|800M"
+  [4]="Big Sur|11|Mac-42FD25EABCABB274|00000000000000000|1024M"
+  [5]="Monterey|12|Mac-E43C1C25D4880AD6|00000000000000000|1024M"
+  [6]="Ventura|13|Mac-B4831CEBD52A0C4C|00000000000000000|1024M"
+  [7]="Sonoma|14|Mac-827FAC58A8FDFA22|00000000000000000|1450M"
+  [8]="Sequoia|15|Mac-7BA5B2D9E42DDD94|00000000000000000|1450M"
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -726,8 +735,12 @@ create_macos_vm() {
 
   local recovery_iso="recovery-${version_name,,}.iso"
 
-  # Network model — virtio for modern macOS, vmxnet3 for older
+  # Network model, virtio for macOS 11+, vmxnet3 for 10.11-10.15, e1000 for older
   local net_model="virtio"
+  case "$version" in
+    10.13|10.14|10.15) net_model="vmxnet3" ;;
+    10.*) net_model="e1000" ;;
+  esac
 
   # Summary
   echo ""
@@ -1398,12 +1411,17 @@ deploy_from_template() {
 main_menu() {
   while true; do
     clear
-    echo -e "${BOLD}"
-    echo "  ┌─────────────────────────────────────────┐"
-    echo "  │       macOS VM Manager v${VERSION}          │"
-    echo "  │       for Proxmox VE                     │"
-    echo "  └─────────────────────────────────────────┘"
-    echo -e "${NC}"
+    echo ""
+    echo "     #############################################"
+    echo "     #                                           #"
+    echo "     #      macOS VM Manager for Proxmox VE      #"
+    echo "     #                                           #"
+    echo "     #        Developed by mchiappinam           #"
+    echo "     #         github.com/mchiappinam            #"
+    echo "     #                                           #"
+    echo "     #############################################"
+    echo ""
+    echo -e "  Version: ${CYAN}${VERSION}${NC}"
 
     local nextid
     nextid=$(pvesh get /cluster/nextid 2>/dev/null) || nextid="?"
@@ -1434,13 +1452,13 @@ main_menu() {
     done
     echo ""
     echo "  Tools:"
-    echo "    9  - Pre-flight system check"
-    echo "   10  - List macOS VMs"
-    echo "   11  - Delete a macOS VM"
-    echo "   12  - Toggle verbose boot"
-    echo "   13  - Show VM config"
-    echo "   14  - Clone a macOS VM"
-    echo "   15  - Convert VM to template"
+    echo "   20  - Pre-flight system check"
+    echo "   21  - List macOS VMs"
+    echo "   22  - Delete a macOS VM"
+    echo "   23  - Toggle verbose boot"
+    echo "   24  - Show VM config"
+    echo "   25  - Clone a macOS VM"
+    echo "   26  - Convert VM to template"
     echo ""
     echo "    0  - Quit"
     echo ""
@@ -1451,7 +1469,7 @@ main_menu() {
         if $has_templates; then
           deploy_from_template
         else
-          warn "No templates available. Create one first (option 15)."
+          warn "No templates available. Create one first (option 26)."
           sleep 2
         fi
         ;;
@@ -1463,13 +1481,13 @@ main_menu() {
           sleep 1
         fi
         ;;
-      9)  preflight_check ;;
-      10) list_macos_vms ;;
-      11) delete_macos_vm ;;
-      12) toggle_verbose_boot ;;
-      13) show_vm_config ;;
-      14) clone_macos_vm ;;
-      15) convert_to_template ;;
+      20) preflight_check ;;
+      21) list_macos_vms ;;
+      22) delete_macos_vm ;;
+      23) toggle_verbose_boot ;;
+      24) show_vm_config ;;
+      25) clone_macos_vm ;;
+      26) convert_to_template ;;
       0|"") exit 0 ;;
       *)  warn "Invalid option"; sleep 1 ;;
     esac
